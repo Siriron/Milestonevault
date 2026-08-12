@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  body {
+    @apply bg-parchment text-ink font-body antialiased;
+  }
+
+  ::selection {
+    @apply bg-copper/30 text-ink;
+  }
+
+  :focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-copper;
+  }
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-vault/20 bg-white/60 px-3.5 py-2.5 font-body text-sm text-ink placeholder:text-ink/35 transition-colors focus:border-copper focus:outline-none;
+  }
+}
