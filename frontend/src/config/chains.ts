@@ -19,13 +19,20 @@ export interface ChainConfig {
 // path open for a future redeploy -- matching this project's own
 // established, live-verified pattern (see chains.ts on the Recourse
 // build), not a hardcoded-only shortcut.
+//
+// REDEPLOYED (Aug 12 2026): the original addresses had the confirmed
+// fetch-truncation bug (_MAX_FETCH_LEN too small, cutting off GitHub's
+// raw HTML before the star-count region). These addresses point at the
+// fixed contract. Old addresses, superseded, kept here only for
+// reference: StudioNet 0xC2F792A48E39122E82b082cbaE0Eb019692206cb,
+// Bradbury 0x759C60e3F8d1aAeafE6D55F820D1EAcc54aA95F2.
 const STUDIONET_CONTRACT_ADDRESS =
   import.meta.env.VITE_CONTRACT_ADDRESS_STUDIONET ||
-  '0xC2F792A48E39122E82b082cbaE0Eb019692206cb';
+  '0x750DED02407b0Fd4EE6629C0FF41b8413a9c4e37';
 
 const BRADBURY_CONTRACT_ADDRESS =
   import.meta.env.VITE_CONTRACT_ADDRESS_BRADBURY ||
-  '0x759C60e3F8d1aAeafE6D55F820D1EAcc54aA95F2';
+  '0x9C58eB70Bf744969f2712552fF2958bfB9e5aA06';
 
 export const CHAINS: Record<NetworkKey, ChainConfig> = {
   studionet: {
