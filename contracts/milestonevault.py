@@ -79,6 +79,27 @@ corresponding safety benefit in this specific design, so it is
 deliberately omitted rather than added by default.
 
 DELIBERATE GAPS, STATED EXPLICITLY:
+  - CONFIRMED LIVE BUG, FIXED: a live submit_attempt test against a real
+    repo (158 actual stars, target 100) returned not_met, with the
+    model's own reasoning correctly reporting that the fetched content
+    was truncated GitHub HTML head boilerplate that never reached the
+    repo header region containing the star count. Root cause was
+    _MAX_FETCH_LEN (originally 4000) truncating the raw HTML before the
+    relevant evidence appeared — not a model or validator defect; the
+    content_reasoning check (_reasoning_references_target) correctly
+    caught this as an honestly-reported non-match, doing its job. Fixed
+    by (a) raising _MAX_FETCH_LEN substantially (20000) per the
+    confirmed official GitHubProfilesSummaries example, which fetches
+    the full raw page with no truncation at all before analysis, and
+    (b) adding concrete GitHub-markup guidance to the charter for all
+    three criterion types (specific id/class/attribute patterns to
+    search for, explicit warnings against matching an incidental
+    unrelated occurrence of the same keyword elsewhere on the page),
+    since raw-HTML extraction of one specific fact is a harder task
+    than the charter originally assumed. Not yet re-verified live after
+    this fix — the next submit_attempt test against the same known-158-
+    star repo is what actually confirms this, not the reasoning above
+    on its own.
   - Content validation on the LLM's reasoning field goes beyond a
     length check: validator_fn requires a "met" verdict's reasoning to
     actually reference the locked target_value it claims to have
@@ -123,7 +144,17 @@ import json
 # ---------------------------------------------------------------------------
 
 _MAX_TEXT_LEN = 2000
-_MAX_FETCH_LEN = 4000
+_MAX_FETCH_LEN = 20000  # raised from 4000 after a live test showed the
+                          # original cap truncated GitHub's raw HTML before
+                          # the repo header region (where star count lives)
+                          # was reached — confirmed via the official
+                          # GitHubProfilesSummaries example, which fetches
+                          # the full page with NO truncation at all before
+                          # analysis. 20000 is a deliberate large margin,
+                          # not a minimal bump, since GitHub's markup is
+                          # verbose and the exact byte offset of any given
+                          # fact isn't something this contract can rely on
+                          # knowing precisely.
 _MAX_REASONING_STORE_LEN = 800
 _MIN_REASONING_LEN = 20
 
@@ -141,18 +172,46 @@ _CHARTER = (
     "content of the actual relevant GitHub page. Your ONLY job is to "
     "determine whether the fetched page content demonstrates that the "
     "criterion is genuinely satisfied right now. Rules:\n"
-    "- For star_count: the milestone target is a minimum star count. "
-    "Look for the repository's current star count in the fetched "
-    "content. The criterion is met only if the actual count is greater "
-    "than or equal to the target.\n"
+    "- For star_count: the milestone target is a minimum star count. The "
+    "content you receive is the RAW HTML of a GitHub repo page, not "
+    "clean text, so the star count will be embedded inside markup, not "
+    "sitting alone. Look specifically for: an element with an id or "
+    "class containing the word 'star' (e.g. 'repo-stars-counter-star' "
+    "or similar), often near the words 'Star' or 'Starred'; the number "
+    "may appear as visible text inside a <span>, or inside a 'title' or "
+    "'aria-label' attribute (e.g. title=\"1,234 users starred this "
+    "repository\"). GitHub sometimes abbreviates large counts (e.g. "
+    "\"1.2k\" for 1,200) — if you find an abbreviated form, use the "
+    "exact digits and suffix as shown, don't guess a precise number "
+    "from an abbreviation. The criterion is met only if the actual "
+    "count is greater than or equal to the target. Do not give up and "
+    "return not_met just because the content is HTML rather than plain "
+    "text — search the markup deliberately for the patterns described "
+    "above before concluding the count isn't present.\n"
     "- For pr_merged: the milestone target is a pull request identifier. "
-    "The criterion is met only if the fetched content clearly shows "
-    "that specific pull request's status as merged (not open, not "
-    "closed-unmerged, not draft).\n"
+    "The content is the RAW HTML of that specific pull request's page. "
+    "GitHub PR pages show status via a specific state indicator near "
+    "the top of the page — look for an element containing the literal "
+    "word 'Merged' as the PR's OWN status label (often near text like "
+    "'merged commit' and a commit hash, or a purple/colored status "
+    "badge), not just any occurrence of the word 'merged' elsewhere on "
+    "the page (which can appear in unrelated sidebar links, linked "
+    "issues, or commit history messages that don't describe THIS PR's "
+    "own status). If the page shows the PR as 'Open', 'Closed' without "
+    "a merge commit, or 'Draft', the criterion is not met even if the "
+    "word 'merged' appears elsewhere on the page for a different "
+    "reason. When in doubt about whether a 'merged' mention actually "
+    "describes this PR's own current state, return not_met rather than "
+    "assume.\n"
     "- For release_tag: the milestone target is a release tag name. The "
-    "criterion is met only if the fetched content clearly shows a "
-    "release or tag with that exact name genuinely published on the "
-    "repository.\n"
+    "content is the RAW HTML of that specific release/tag page. Look "
+    "for the exact tag name as it would appear in a release title, a "
+    "tag label near the top of the page, or the page's own URL/canonical "
+    "link embedded in the HTML confirming this tag exists. The "
+    "criterion is met only if that exact tag name is confirmed present "
+    "for a genuine, published release on the fetched page itself — not "
+    "merely because the tag name string happens to appear somewhere "
+    "incidental, such as in a comparison link to a different tag.\n"
     "- If the fetched content is an error marker, empty, unrelated, or "
     "simply does not contain enough information to confirm the "
     "criterion, you must return not_met — never guess or assume "
