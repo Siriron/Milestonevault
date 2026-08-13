@@ -79,8 +79,8 @@ re-derivation is what keeps either bias from deciding a real payout alone.
 
 | Network | Address | Explorer |
 |---|---|---|
-| StudioNet | `0xC2F792A48E39122E82b082cbaE0Eb019692206cb` | [View](https://explorer-studio.genlayer.com/address/0xC2F792A48E39122E82b082cbaE0Eb019692206cb) |
-| Bradbury | `0x759C60e3F8d1aAeafE6D55F820D1EAcc54aA95F2` | [View](https://explorer-bradbury.genlayer.com/address/0x759C60e3F8d1aAeafE6D55F820D1EAcc54aA95F2) |
+| StudioNet | `0x750DED02407b0Fd4EE6629C0FF41b8413a9c4e37` | [View](https://explorer-studio.genlayer.com/address/0x750DED02407b0Fd4EE6629C0FF41b8413a9c4e37) |
+| Bradbury | `0x9C58eB70Bf744969f2712552fF2958bfB9e5aA06` | [View](https://explorer-bradbury.genlayer.com/address/0x9C58eB70Bf744969f2712552fF2958bfB9e5aA06) |
 
 </div>
 
@@ -120,21 +120,27 @@ LICENSE                         MIT
 
 <div align="center">
 
-![Deployed](https://img.shields.io/badge/deploys%20cleanly%2C%20both%20networks-confirmed-brightgreen?style=flat-square)
-![Writes](https://img.shields.io/badge/create__milestone%20%2F%20submit__attempt-untested-yellow?style=flat-square)
+![CreateMilestone](https://img.shields.io/badge/create__milestone-confirmed%20live-brightgreen?style=flat-square)
+![SubmitAttempt](https://img.shields.io/badge/submit__attempt%20on%20current%20deploy-untested-yellow?style=flat-square)
 
 </div>
 
-**Honest, unrounded status:** the contract deploys cleanly to both networks — meaning it passed
-lint and schema load — but no write method has been exercised against either deployed address
-yet. No `create_milestone` or `submit_attempt` transaction has been sent, no stderr has been
-read, no verdict has been produced. Deployment success confirms the contract loads; it does not
-confirm any write path executes correctly, and this project's own history has repeatedly shown
-that settlement and nondet bugs stay invisible until a write method actually reaches that code.
-The frontend is built and wired to call both methods correctly against the deployed addresses,
-but "the app doesn't crash" and "the contract genuinely does the right thing when called" are
-different, unconfirmed claims. See [`docs/deployment.md`](./docs/deployment.md) for exactly what
-a live test would need to check before this line changes.
+**Honest, unrounded status:** `create_milestone` is confirmed live — a real transaction against
+an earlier deployment returned `SUCCESS` with empty stderr and the correct JSON return.
+`submit_attempt` was also run live against that earlier deployment and executed cleanly end to
+end (fetch, LLM judgment, consensus, storage write all completed with empty stderr) — but it
+returned an incorrect `not_met` verdict on a milestone that should have resolved `met`. The
+model's own reasoning made the cause traceable: the evidence-fetch truncation cap
+(`_MAX_FETCH_LEN`) cut GitHub's raw HTML off before the star-count region ever reached the
+prompt. That's a confirmed, understood bug, not a mystery — full detail in the contract's own
+docstring and in [`docs/deployment.md`](./docs/deployment.md).
+
+The fix (a substantially larger fetch cap, confirmed against GenLayer's own
+`GitHubProfilesSummaries` example, plus concrete GitHub-markup guidance added to the judging
+prompt for all three criterion types) has been made and redeployed to the addresses above. **It
+has not yet been re-tested live.** The addresses in this README point at the fixed contract, but
+"the fix should work" and "the fix was confirmed against a real transaction" are different
+claims, and only the second one changes this paragraph.
 
 <br />
 
