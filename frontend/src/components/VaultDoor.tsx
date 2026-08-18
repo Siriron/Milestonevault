@@ -1,16 +1,23 @@
 import { motion } from 'framer-motion';
 
 interface VaultDoorProps {
-  status: 'locked' | 'released' | 'pending';
+  status: 'locked' | 'released' | 'pending' | 'reclaimed';
   size?: 'sm' | 'lg';
 }
 
 // The signature element: a literal vault door whose visual state is tied
 // directly to the milestone's real on-chain status, not a decorative icon.
 // Locked = sealed, bolted. Pending = the dial mid-turn during a live
-// submit_attempt call. Released = open, the seal broken.
+// submit_attempt call. Released = open, the seal broken, criterion
+// genuinely met. Reclaimed = also open (the grantor did open it), but
+// drawn in a colder, greyed register rather than copper's warm "success"
+// tone -- this is the grantor pulling funds back after a deadline passed
+// unmet, not a completed milestone, and the door shouldn't read as a win
+// for either party.
 export function VaultDoor({ status, size = 'sm' }: VaultDoorProps) {
   const dim = size === 'lg' ? 96 : 40;
+  const isOpen = status === 'released' || status === 'reclaimed';
+  const accent = status === 'released' ? '#B87333' : status === 'reclaimed' ? '#8A8172' : '#3D2B1F';
 
   return (
     <div className="relative inline-flex items-center justify-center" style={{ width: dim, height: dim }}>
@@ -23,7 +30,7 @@ export function VaultDoor({ status, size = 'sm' }: VaultDoorProps) {
           height="88"
           rx="6"
           fill="none"
-          stroke={status === 'released' ? '#B87333' : '#3D2B1F'}
+          stroke={isOpen ? accent : '#3D2B1F'}
           strokeWidth="3"
         />
         {/* Door plate */}
@@ -33,11 +40,11 @@ export function VaultDoor({ status, size = 'sm' }: VaultDoorProps) {
           width="72"
           height="72"
           rx="3"
-          fill={status === 'released' ? '#F0EAE0' : '#3D2B1F'}
-          stroke={status === 'released' ? '#B87333' : 'none'}
+          fill={isOpen ? '#F0EAE0' : '#3D2B1F'}
+          stroke={isOpen ? accent : 'none'}
           strokeWidth="2"
           animate={
-            status === 'released'
+            isOpen
               ? { opacity: [0.4, 1] }
               : status === 'pending'
                 ? { opacity: [1, 0.7, 1] }
@@ -51,7 +58,7 @@ export function VaultDoor({ status, size = 'sm' }: VaultDoorProps) {
         />
         {/* Dial */}
         <motion.g
-          animate={status === 'pending' ? { rotate: 360 } : { rotate: status === 'released' ? 45 : 0 }}
+          animate={status === 'pending' ? { rotate: 360 } : { rotate: isOpen ? 45 : 0 }}
           transition={
             status === 'pending'
               ? { duration: 3, repeat: Infinity, ease: 'linear' }
@@ -64,13 +71,13 @@ export function VaultDoor({ status, size = 'sm' }: VaultDoorProps) {
             cy="50"
             r="16"
             fill="none"
-            stroke={status === 'released' ? '#B87333' : '#F0EAE0'}
+            stroke={isOpen ? accent : '#F0EAE0'}
             strokeWidth="2.5"
           />
-          <line x1="50" y1="36" x2="50" y2="44" stroke={status === 'released' ? '#B87333' : '#F0EAE0'} strokeWidth="2.5" />
+          <line x1="50" y1="36" x2="50" y2="44" stroke={isOpen ? accent : '#F0EAE0'} strokeWidth="2.5" />
         </motion.g>
         {/* Bolts, visible only when locked or pending */}
-        {status !== 'released' && (
+        {!isOpen && (
           <>
             <circle cx="22" cy="22" r="2.5" fill="#F0EAE0" opacity="0.6" />
             <circle cx="78" cy="22" r="2.5" fill="#F0EAE0" opacity="0.6" />

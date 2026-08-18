@@ -1,4 +1,4 @@
-import { CHAINS, NONDET_METHODS, type NetworkKey } from '../config/chains';
+import { CHAIN, NONDET_METHODS } from '../config/chains';
 import { isTimeoutError } from '../lib/timeoutError';
 
 export type TxState =
@@ -10,7 +10,6 @@ export type TxState =
 
 interface TxStatusProps {
   state: TxState;
-  network: NetworkKey;
 }
 
 // Distinguishes pending / success / timeout / error as genuinely
@@ -18,9 +17,7 @@ interface TxStatusProps {
 // state as a rejected transaction, and collapsing them loses exactly the
 // information the person needs (their transaction likely succeeded; go
 // check).
-export function TxStatus({ state, network }: TxStatusProps) {
-  const explorerBase = CHAINS[network].explorerUrl;
-
+export function TxStatus({ state }: TxStatusProps) {
   if (state.phase === 'idle') return null;
 
   if (state.phase === 'pending') {
@@ -46,7 +43,7 @@ export function TxStatus({ state, network }: TxStatusProps) {
       <div className="rounded-lg border border-copper/30 bg-copper/5 px-4 py-3 font-body text-sm text-ink/80">
         Confirmed.{' '}
         <a
-          href={`${explorerBase}/tx/${state.txHash}`}
+          href={`${CHAIN.explorerUrl}/tx/${state.txHash}`}
           target="_blank"
           rel="noreferrer"
           className="underline hover:text-copper"
@@ -63,7 +60,7 @@ export function TxStatus({ state, network }: TxStatusProps) {
         Consensus is taking longer than expected. Your transaction was submitted — it likely
         succeeded even though this page stopped waiting.{' '}
         <a
-          href={`${explorerBase}/tx/${state.txHash}`}
+          href={`${CHAIN.explorerUrl}/tx/${state.txHash}`}
           target="_blank"
           rel="noreferrer"
           className="underline hover:text-copper"

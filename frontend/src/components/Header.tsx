@@ -1,12 +1,10 @@
 import { Link, NavLink } from 'react-router-dom';
 import { useGenLayer } from '../hooks/useGenLayer';
-import { useNetwork } from '../hooks/useNetwork';
 import { formatAddress } from '../lib/format';
 import { VaultDoor } from './VaultDoor';
 
 export function Header() {
   const { account, connect, connecting, isConnected } = useGenLayer();
-  const { network, setNetwork } = useNetwork();
 
   return (
     <header className="sticky top-0 z-40 border-b border-vault/10 bg-parchment/90 backdrop-blur-sm">
@@ -46,27 +44,9 @@ export function Header() {
         </nav>
 
         <div className="flex items-center gap-3">
-          {/* Network toggle is UI state only -- the wallet chain switch
-              happens at write time via ensureChain, never on this click,
-              so toggling never itself triggers a wallet popup. */}
-          <div className="hidden items-center rounded-full border border-vault/15 bg-white/40 p-0.5 text-xs sm:flex">
-            <button
-              onClick={() => setNetwork('studionet')}
-              className={`rounded-full px-3 py-1.5 font-body transition-colors ${
-                network === 'studionet' ? 'bg-vault text-parchment' : 'text-ink/60 hover:text-ink'
-              }`}
-            >
-              StudioNet
-            </button>
-            <button
-              onClick={() => setNetwork('bradbury')}
-              className={`rounded-full px-3 py-1.5 font-body transition-colors ${
-                network === 'bradbury' ? 'bg-vault text-parchment' : 'text-ink/60 hover:text-ink'
-              }`}
-            >
-              Bradbury
-            </button>
-          </div>
+          <span className="hidden rounded-full border border-vault/15 bg-white/40 px-3 py-1.5 font-body text-xs text-ink/50 sm:inline-block">
+            StudioNet
+          </span>
 
           <button
             onClick={connect}
