@@ -1,4 +1,4 @@
-import { CHAINS, type NetworkKey } from '../config/chains';
+import { CHAIN } from '../config/chains';
 
 export interface TimeoutError extends Error {
   txHash: string;
@@ -12,10 +12,9 @@ export interface TimeoutError extends Error {
 // an actual rejected/reverted transaction. A timeout means the
 // transaction was submitted and consensus is still working -- it likely
 // succeeded -- which is a different UI state from a real failure.
-export function timeoutError(network: NetworkKey, hash: string): TimeoutError {
-  const base = CHAINS[network].explorerUrl;
+export function timeoutError(hash: string): TimeoutError {
   const err = new Error(
-    `Consensus is taking longer than expected. Your transaction was submitted -- check its status directly: ${base}/tx/${hash}`
+    `Consensus is taking longer than expected. Your transaction was submitted -- check its status directly: ${CHAIN.explorerUrl}/tx/${hash}`
   ) as TimeoutError;
   err.txHash = hash;
   err.isTimeout = true;

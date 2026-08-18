@@ -20,3 +20,23 @@ export function formatAddress(addr: string): string {
 export function formatAttempts(count: number): string {
   return count === 1 ? '1 attempt' : `${count} attempts`;
 }
+
+export function formatDeadline(deadlineTsSeconds: number): string {
+  // deadline_ts is Unix epoch seconds, contract-derived from
+  // gl.message_raw["datetime"] at creation via _now_epoch_seconds() --
+  // never client-set, so this is safe to trust for display. JS Date
+  // wants milliseconds.
+  if (!deadlineTsSeconds || deadlineTsSeconds <= 0) return 'unknown';
+  const d = new Date(deadlineTsSeconds * 1000);
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+export function isPastDeadline(deadlineTsSeconds: number, nowMs: number = Date.now()): boolean {
+  // Client-side convenience check ONLY, for gating which button renders --
+  // the contract re-checks now_ts >= deadline_ts against its own on-chain
+  // clock independently at call time via _now_epoch_seconds(), so a
+  // clock-skewed or spoofed client value here can at most show the wrong
+  // button state, never bypass the real deadline enforced on-chain.
+  if (!deadlineTsSeconds || deadlineTsSeconds <= 0) return false;
+  return nowMs >= deadlineTsSeconds * 1000;
+}

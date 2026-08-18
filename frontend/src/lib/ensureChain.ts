@@ -1,4 +1,4 @@
-import { CHAINS, type NetworkKey } from '../config/chains';
+import { CHAIN } from '../config/chains';
 
 declare global {
   interface Window {
@@ -7,27 +7,25 @@ declare global {
 }
 
 // Confirmed working pattern, adapted from this project's established
-// Sigil-derived ensureChain (also used by Copyleft and Recourse). Call
-// immediately before every write, never on every network-toggle click --
-// toggling should never itself trigger a wallet popup, only the actual
-// write action should.
-export async function ensureChain(network: NetworkKey): Promise<void> {
+// Sigil-derived ensureChain. Call immediately before every write, never
+// on page load or any other trigger -- only the actual write action
+// should ever prompt a wallet popup.
+export async function ensureChain(): Promise<void> {
   const eth = window.ethereum;
   if (!eth) return;
 
-  const cfg = CHAINS[network];
   const walletChainConfig = {
-    chainId: cfg.chainIdHex,
-    chainName: cfg.chainName,
-    rpcUrls: [cfg.rpcUrl],
+    chainId: CHAIN.chainIdHex,
+    chainName: CHAIN.chainName,
+    rpcUrls: [CHAIN.rpcUrl],
     nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
-    blockExplorerUrls: [cfg.explorerUrl],
+    blockExplorerUrls: [CHAIN.explorerUrl],
   };
 
   try {
     await eth.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: cfg.chainIdHex }],
+      params: [{ chainId: CHAIN.chainIdHex }],
     });
   } catch (err: any) {
     if (err && err.code === 4902) {
@@ -37,7 +35,7 @@ export async function ensureChain(network: NetworkKey): Promise<void> {
       });
       await eth.request({
         method: 'wallet_switchEthereumChain',
-        params: [{ chainId: cfg.chainIdHex }],
+        params: [{ chainId: CHAIN.chainIdHex }],
       });
     } else if (err && err.code === -32002) {
       // A wallet_switchEthereumChain request is already pending -- wait
