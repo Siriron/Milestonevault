@@ -49,10 +49,33 @@ threshold. This is gated on `met` only: a `not_met` verdict can legitimately exp
 without repeating the target value (e.g. a dead-fetch marker), and penalizing that would punish
 honest negative verdicts rather than catch weak ones.
 
+## Bounded expiry (added Aug 16 2026, per steward review)
+
+Every milestone locks a `deadline_days` value (1–3650) at `create_milestone`, converted to an
+absolute `deadline_ts` from the contract's own on-chain clock at that moment — never a value
+either party can set after the fact, and never re-derived from the client's local clock.
+`submit_attempt` is blocked once the deadline passes; `reclaim_stake` becomes callable by the
+grantor only, only once the deadline has passed, only while the milestone is still `locked`.
+This closes the two ways a stake could otherwise lock forever: a criterion the recipient never
+meets, and a recipient who is simply unreachable (wrong address, lost key, or one who never
+acts) — the deadline recovers the grantor's funds either way, with no dependency on the
+recipient doing anything.
+
+The deadline is locked at creation and cannot be extended by either party afterward — the same
+locked-before-outcome-is-known discipline this contract already applies to `repo_owner`,
+`repo_name`, and `target_value`. A grantor who wants to give a stalled recipient more time has
+no way to do so within this contract; that's a deliberate trade-off in favor of keeping the
+lock genuinely immutable, not an oversight.
+
 ## Deliberate gaps
 
-- No deadline or grantor-reclaim path. A stake can sit locked indefinitely if a recipient never
-  completes the criterion. Out of scope for this version.
+- `target_value`/`repo_owner`/`repo_name` type-checking is format-only (numeric for
+  `star_count`/`pr_merged`, GitHub-legal characters for `release_tag`/repo fields) — it cannot
+  and does not confirm the target actually exists on GitHub before creation, since that would
+  require a fetch outside the nondet block at creation time, which this contract doesn't do. A
+  syntactically valid but nonexistent PR number or tag still creates successfully and resolves
+  `not_met` on every attempt until the deadline passes, at which point `reclaim_stake` is the
+  recovery path for that case too.
 - Only three criterion types (star count, PR merge status, release tag existence). Arbitrary
   free-text criteria are explicitly out of scope — that would reintroduce an unverifiable,
   party-described claim.
