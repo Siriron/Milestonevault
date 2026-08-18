@@ -1,16 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, createContext, useContext, type ReactNode } from 'react';
 import { createClient } from 'genlayer-js';
-import { studionet, testnetBradbury } from 'genlayer-js/chains';
+import { studionet } from 'genlayer-js/chains';
 import { TransactionStatus } from 'genlayer-js/types';
-import { CHAINS, RECEIPT_CONFIG, type NetworkKey } from '../config/chains';
+import { CHAIN, RECEIPT_CONFIG } from '../config/chains';
 import { ensureChain } from '../lib/ensureChain';
 import { timeoutError } from '../lib/timeoutError';
-import { useNetwork } from './useNetwork';
-
-const SDK_CHAINS = {
-  studionet,
-  bradbury: testnetBradbury,
-};
 
 interface GenLayerContextValue {
   account: string | null;
@@ -32,10 +26,13 @@ const GenLayerContext = createContext<GenLayerContextValue | null>(null);
 // not per-component. Every page reads the same account/connecting state
 // through this single provider, so connecting via the header immediately
 // updates what every other page believes about wallet state. Matches this
-// project's own established, live-verified pattern (see Recourse's
-// useGenLayer.tsx and its comment on the bug this fixes).
+// project's own established, live-verified pattern.
+//
+// This project targets StudioNet exclusively (project knowledge section 7) --
+// no network parameter anywhere in this hook. A prior version of this file
+// threaded a NetworkKey through every function here; that's been removed
+// along with useNetwork.tsx, not left as dead plumbing with one branch.
 export function GenLayerProvider({ children }: { children: ReactNode }) {
-  const { network } = useNetwork();
   const [account, setAccount] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
@@ -80,17 +77,17 @@ export function GenLayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const readClient = useMemo(() => {
-    return createClient({ chain: SDK_CHAINS[network] });
-  }, [network]);
+    return createClient({ chain: studionet });
+  }, []);
 
   const writeClient = useMemo(() => {
     if (!account || !window.ethereum) return null;
     // provider: window.ethereum is required -- omitting it caused a
-    // confirmed live bug on Copyleft where writes filed while StudioNet
-    // was selected silently executed on Bradbury instead, since the
-    // client had no wallet provider bound to force the chain.
+    // confirmed live bug on Copyleft where writes filed silently
+    // executed on the wrong network, since the client had no wallet
+    // provider bound to force the chain.
     const client = createClient({
-      chain: SDK_CHAINS[network],
+      chain: studionet,
       account: account as `0x${string}`,
       provider: window.ethereum,
     });
@@ -98,16 +95,15 @@ export function GenLayerProvider({ children }: { children: ReactNode }) {
     // project's confirmed working code. Guarded so contracts built on
     // SDK versions without it don't throw.
     if (typeof (client as any).connect === 'function') {
-      (client as any).connect(network).catch(() => {});
+      (client as any).connect('studionet').catch(() => {});
     }
     return client;
-  }, [account, network]);
+  }, [account]);
 
   const readContract = useCallback(
     async (functionName: string, args: any[] = []) => {
-      const cfg = CHAINS[network];
       const result = await readClient.readContract({
-        address: cfg.contractAddress as `0x${string}`,
+        address: CHAIN.contractAddress as `0x${string}`,
         functionName,
         args,
       });
@@ -121,7 +117,7 @@ export function GenLayerProvider({ children }: { children: ReactNode }) {
       }
       return result;
     },
-    [readClient, network]
+    [readClient]
   );
 
   const writeContract = useCallback(
@@ -129,23 +125,21 @@ export function GenLayerProvider({ children }: { children: ReactNode }) {
       if (!writeClient || !account) {
         throw new Error('Connect a wallet before sending a transaction.');
       }
-      await ensureChain(network);
-      const cfg = CHAINS[network];
+      await ensureChain();
 
       const txHash = await writeClient.writeContract({
-        address: cfg.contractAddress as `0x${string}`,
+        address: CHAIN.contractAddress as `0x${string}`,
         functionName,
         args,
         value,
       });
 
-      const receiptCfg = RECEIPT_CONFIG[network];
       try {
         const receipt = await writeClient.waitForTransactionReceipt({
           hash: txHash,
           status: TransactionStatus.ACCEPTED,
-          retries: receiptCfg.retries,
-          interval: receiptCfg.interval,
+          retries: RECEIPT_CONFIG.retries,
+          interval: RECEIPT_CONFIG.interval,
         });
         return { txHash, receipt };
       } catch (err: any) {
@@ -158,12 +152,12 @@ export function GenLayerProvider({ children }: { children: ReactNode }) {
         // failure the same way.
         const looksLikeTimeout = /timeout|timed out|exceeded.*retries/i.test(err?.message || '');
         if (looksLikeTimeout) {
-          throw timeoutError(network, txHash);
+          throw timeoutError(txHash);
         }
         throw err;
       }
     },
-    [writeClient, account, network]
+    [writeClient, account]
   );
 
   const value: GenLayerContextValue = {
