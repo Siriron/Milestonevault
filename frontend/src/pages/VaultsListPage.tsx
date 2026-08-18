@@ -10,7 +10,7 @@ import { VaultDoor } from '../components/VaultDoor';
 // get_next_id() and get_milestone(id). This page reads next_id to know
 // the valid range, then fetches each record individually. Fine at this
 // project's expected scale; would need the narrow-index-TreeMap pattern
-// (project knowledge \u00a74) if record counts grew large.
+// (project knowledge section 4) if record counts grew large.
 export function VaultsListPage() {
   const { readContract } = useGenLayer();
   const [milestones, setMilestones] = useState<Milestone[]>([]);
@@ -78,6 +78,14 @@ export function VaultsListPage() {
       <div className="grid gap-4 sm:grid-cols-2">
         {milestones.map((m) => {
           const criterionMeta = CRITERION_TYPES.find((c) => c.value === m.criterion_type);
+          const doorStatus = m.status === 'released' ? 'released' : m.status === 'reclaimed' ? 'reclaimed' : 'locked';
+          const badgeLabel = m.status === 'released' ? 'Released' : m.status === 'reclaimed' ? 'Reclaimed' : 'Locked';
+          const badgeCls =
+            m.status === 'released'
+              ? 'bg-copper/15 text-copper'
+              : m.status === 'reclaimed'
+                ? 'bg-vault/10 text-ink/60'
+                : 'bg-pending/15 text-pending';
           return (
             <Link
               key={m.milestone_id}
@@ -85,14 +93,8 @@ export function VaultsListPage() {
               className="group rounded-xl border border-vault/10 bg-white/40 p-5 transition-colors hover:border-copper/40 hover:bg-white/70"
             >
               <div className="mb-3 flex items-center justify-between">
-                <VaultDoor status={m.status === 'released' ? 'released' : 'locked'} size="sm" />
-                <span
-                  className={`rounded-full px-2.5 py-0.5 font-body text-xs ${
-                    m.status === 'released' ? 'bg-copper/15 text-copper' : 'bg-pending/15 text-pending'
-                  }`}
-                >
-                  {m.status === 'released' ? 'Released' : 'Locked'}
-                </span>
+                <VaultDoor status={doorStatus} size="sm" />
+                <span className={`rounded-full px-2.5 py-0.5 font-body text-xs ${badgeCls}`}>{badgeLabel}</span>
               </div>
               <h3 className="font-display text-base text-ink group-hover:text-copper">
                 {m.repo_owner}/{m.repo_name}

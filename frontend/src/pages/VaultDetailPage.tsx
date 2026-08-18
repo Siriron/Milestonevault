@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useGenLayer } from '../hooks/useGenLayer';
-import { useNetwork } from '../hooks/useNetwork';
-import { buildSubmitAttemptArgs, buildGetMilestoneArgs, type Milestone } from '../lib/contract';
-import { formatGen, formatAddress, formatAttempts } from '../lib/format';
+import { buildSubmitAttemptArgs, buildReclaimStakeArgs, buildGetMilestoneArgs, type Milestone } from '../lib/contract';
+import { formatGen, formatAddress, formatAttempts, formatDeadline, isPastDeadline } from '../lib/format';
 import { CRITERION_TYPES } from '../config/chains';
 import { TxStatus, txStateFromError, type TxState } from '../components/TxStatus';
 import { VaultDoor } from '../components/VaultDoor';
@@ -11,7 +10,6 @@ import { VaultDoor } from '../components/VaultDoor';
 export function VaultDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isConnected, connect, account, readContract, writeContract } = useGenLayer();
-  const { network } = useNetwork();
 
   const [milestone, setMilestone] = useState<Milestone | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,6 +41,21 @@ export function VaultDetailPage() {
       const { txHash } = await writeContract(
         'submit_attempt',
         buildSubmitAttemptArgs(milestoneId),
+        BigInt(0)
+      );
+      setTxState({ phase: 'success', txHash });
+      await load();
+    } catch (err) {
+      setTxState(txStateFromError(err));
+    }
+  }
+
+  async function handleReclaim() {
+    setTxState({ phase: 'pending', functionName: 'reclaim_stake' });
+    try {
+      const { txHash } = await writeContract(
+        'reclaim_stake',
+        buildReclaimStakeArgs(milestoneId),
         BigInt(0)
       );
       setTxState({ phase: 'success', txHash });
@@ -84,8 +97,16 @@ export function VaultDetailPage() {
 
   const criterionMeta = CRITERION_TYPES.find((c) => c.value === milestone.criterion_type);
   const isRecipient = account && account.toLowerCase() === milestone.recipient.toLowerCase();
+  const isGrantor = account && account.toLowerCase() === milestone.grantor.toLowerCase();
+  const deadlinePassed = isPastDeadline(milestone.deadline_ts);
   const doorStatus =
-    milestone.status === 'released' ? 'released' : txState.phase === 'pending' ? 'pending' : 'locked';
+    milestone.status === 'released'
+      ? 'released'
+      : milestone.status === 'reclaimed'
+        ? 'reclaimed'
+        : txState.phase === 'pending'
+          ? 'pending'
+          : 'locked';
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-16">
@@ -115,6 +136,10 @@ export function VaultDetailPage() {
         <Detail label="Attempts so far" value={formatAttempts(milestone.attempt_count)} />
         <Detail label="Grantor" value={formatAddress(milestone.grantor)} mono />
         <Detail label="Recipient" value={formatAddress(milestone.recipient)} mono />
+        <Detail
+          label={milestone.status === 'locked' ? (deadlinePassed ? 'Deadline (passed)' : 'Reclaimable after') : 'Deadline was'}
+          value={formatDeadline(milestone.deadline_ts)}
+        />
       </dl>
 
       {milestone.last_verdict && (
@@ -135,7 +160,7 @@ export function VaultDetailPage() {
         </div>
       )}
 
-      {milestone.status === 'locked' && (
+      {milestone.status === 'locked' && !deadlinePassed && (
         <div className="space-y-4">
           {!isConnected ? (
             <button
@@ -158,7 +183,37 @@ export function VaultDetailPage() {
               Only the recipient's wallet can submit an attempt. Anyone can watch this vault, though.
             </p>
           )}
-          <TxStatus state={txState} network={network} />
+          <TxStatus state={txState} />
+        </div>
+      )}
+
+      {milestone.status === 'locked' && deadlinePassed && (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-pending/30 bg-pending/5 px-4 py-3 text-center font-body text-sm text-ink/75">
+            The deadline has passed with the criterion still unmet. Attempts are closed — the grantor
+            can now reclaim the full stake.
+          </div>
+          {!isConnected ? (
+            <button
+              onClick={connect}
+              className="w-full rounded-full bg-vault px-6 py-3.5 font-body text-sm text-parchment hover:bg-vault-dark"
+            >
+              Connect wallet
+            </button>
+          ) : isGrantor ? (
+            <button
+              onClick={handleReclaim}
+              disabled={txState.phase === 'pending'}
+              className="w-full rounded-full bg-vault px-6 py-3.5 font-body text-sm text-parchment transition-colors hover:bg-vault-dark disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {txState.phase === 'pending' ? 'Reclaiming…' : 'Reclaim stake'}
+            </button>
+          ) : (
+            <p className="text-center font-body text-xs text-ink/45">
+              Only the grantor's wallet can reclaim the stake. Anyone can watch this vault, though.
+            </p>
+          )}
+          <TxStatus state={txState} />
         </div>
       )}
 
@@ -167,20 +222,26 @@ export function VaultDetailPage() {
           Released. The full stake has already moved to the recipient.
         </div>
       )}
+
+      {milestone.status === 'reclaimed' && (
+        <div className="rounded-lg border border-vault/20 bg-white/40 px-4 py-3 text-center font-body text-sm text-ink/70">
+          Reclaimed. The deadline passed with the criterion unmet, and the full stake has moved back
+          to the grantor.
+        </div>
+      )}
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: 'locked' | 'released' }) {
-  return (
-    <span
-      className={`shrink-0 rounded-full px-3 py-1 font-body text-xs ${
-        status === 'released' ? 'bg-copper/15 text-copper' : 'bg-pending/15 text-pending'
-      }`}
-    >
-      {status === 'released' ? 'Released' : 'Locked'}
-    </span>
-  );
+function StatusBadge({ status }: { status: 'locked' | 'released' | 'reclaimed' }) {
+  const label = status === 'released' ? 'Released' : status === 'reclaimed' ? 'Reclaimed' : 'Locked';
+  const cls =
+    status === 'released'
+      ? 'bg-copper/15 text-copper'
+      : status === 'reclaimed'
+        ? 'bg-vault/10 text-ink/60'
+        : 'bg-pending/15 text-pending';
+  return <span className={`shrink-0 rounded-full px-3 py-1 font-body text-xs ${cls}`}>{label}</span>;
 }
 
 function Detail({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
