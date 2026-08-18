@@ -1,5 +1,4 @@
 import { Routes, Route } from 'react-router-dom';
-import { NetworkProvider } from './hooks/useNetwork';
 import { GenLayerProvider } from './hooks/useGenLayer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Header } from './components/Header';
@@ -14,26 +13,22 @@ import { NotFoundPage } from './pages/NotFoundPage';
 export default function App() {
   return (
     <ErrorBoundary>
-      {/* NetworkProvider must wrap GenLayerProvider -- useGenLayer calls
-          useNetwork() internally to know which chain to read/write. */}
-      <NetworkProvider>
-        <GenLayerProvider>
-          <div className="flex min-h-screen flex-col">
-            <Header />
-            <main className="flex-1">
-              <Routes>
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/new" element={<NewMilestonePage />} />
-                <Route path="/vaults" element={<VaultsListPage />} />
-                <Route path="/vaults/:id" element={<VaultDetailPage />} />
-                <Route path="/docs" element={<DocsPage />} />
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
-            </main>
-            <Footer />
-          </div>
-        </GenLayerProvider>
-      </NetworkProvider>
+      <GenLayerProvider>
+        <div className="flex min-h-screen flex-col">
+          <Header />
+          <main className="flex-1">
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/new" element={<NewMilestonePage />} />
+              <Route path="/vaults" element={<VaultsListPage />} />
+              <Route path="/vaults/:id" element={<VaultDetailPage />} />
+              <Route path="/docs" element={<DocsPage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </main>
+          <Footer />
+        </div>
+      </GenLayerProvider>
     </ErrorBoundary>
   );
 }
