@@ -1,8 +1,4 @@
-export type NetworkKey = 'studionet' | 'bradbury';
-
 export interface ChainConfig {
-  key: NetworkKey;
-  label: string;
   chainIdHex: string;
   chainIdDecimal: number;
   chainName: string;
@@ -11,77 +7,83 @@ export interface ChainConfig {
   contractAddress: string;
 }
 
-// Contract addresses are public, not secrets -- safe to check in directly.
-// Reads VITE_CONTRACT_ADDRESS_* first if set (e.g. via Vercel project
-// environment variables, no committed .env required), falling back to the
-// literal deployed address below. This means the app works immediately
-// after clone with zero setup, while still leaving the env-var override
-// path open for a future redeploy -- matching this project's own
-// established, live-verified pattern (see chains.ts on the Recourse
-// build), not a hardcoded-only shortcut.
+// Contract address is public, not a secret -- safe to check in directly.
+// Reads VITE_CONTRACT_ADDRESS_STUDIONET first if set (e.g. via Vercel
+// project environment variables, no committed .env required), falling
+// back to the literal deployed address below. This means the app works
+// immediately after clone with zero setup, while still leaving the
+// env-var override path open for a future redeploy -- matching this
+// project's own established, live-verified pattern.
 //
-// REDEPLOYED (Aug 13 2026): attempt 1's fix (bigger fetch cap, guessed
-// HTML markup patterns) was insufficient -- confirmed by live re-test,
-// not assumed. These addresses run attempt 2's fix: evidence source
-// switched from scraping rendered GitHub HTML to GitHub's own REST API
-// (clean JSON, confirmed against GitHub's official docs). Not yet
-// re-tested live. Superseded addresses, kept only for reference:
-// StudioNet 0x750DED02407b0Fd4EE6629C0FF41b8413a9c4e37 (attempt 1),
-// 0xC2F792A48E39122E82b082cbaE0Eb019692206cb (original, pre-attempt-1);
-// Bradbury 0x9C58eB70Bf744969f2712552fF2958bfB9e5aA06 (attempt 1),
-// 0x759C60e3F8d1aAeafE6D55F820D1EAcc54aA95F2 (original, pre-attempt-1).
+// REDEPLOYED (Aug 18 2026): the steward-review fix (bounded
+// reclaim_stake, deadline_ts, deterministic GitHub-field
+// type-checking) is now live at this address. Not yet re-tested live
+// via Run and Debug -- run the steward's five named test cases
+// (payout, disagreement, fetch failure, replay, recovery) before
+// resubmitting, not assumed correct from the code alone. Superseded
+// addresses, kept only for reference:
+// 0xA572D90194e5937caD8b0dE03A8D245784E5ADd5 (the version Pavel
+// Kolosov's steward review actually looked at, requesting this fix).
+//
+// This project targets StudioNet exclusively (project knowledge
+// section 7) -- Bradbury wiring (network toggle, dual ensureChain/
+// RECEIPT_CONFIG branching) has been removed. A toggle with only one
+// real network behind it is worse than no toggle at all.
 const STUDIONET_CONTRACT_ADDRESS =
   import.meta.env.VITE_CONTRACT_ADDRESS_STUDIONET ||
-  '0xA572D90194e5937caD8b0dE03A8D245784E5ADd5';
+  '0xFB6167948c51F079Ad046a2DA99b480d70eBd6d2';
 
-const BRADBURY_CONTRACT_ADDRESS =
-  import.meta.env.VITE_CONTRACT_ADDRESS_BRADBURY ||
-  '0xa010508a7A294De55B5C89999b9d6347bd0B4688';
-
-export const CHAINS: Record<NetworkKey, ChainConfig> = {
-  studionet: {
-    key: 'studionet',
-    label: 'StudioNet',
-    chainIdHex: '0xF22F', // 61999
-    chainIdDecimal: 61999,
-    chainName: 'GenLayer StudioNet',
-    rpcUrl: 'https://studio.genlayer.com/api',
-    explorerUrl: 'https://explorer-studio.genlayer.com',
-    contractAddress: STUDIONET_CONTRACT_ADDRESS,
-  },
-  bradbury: {
-    key: 'bradbury',
-    label: 'Bradbury',
-    chainIdHex: '0x107D', // 4221
-    chainIdDecimal: 4221,
-    chainName: 'GenLayer Bradbury',
-    rpcUrl: 'https://rpc-bradbury.genlayer.com',
-    explorerUrl: 'https://explorer-bradbury.genlayer.com',
-    contractAddress: BRADBURY_CONTRACT_ADDRESS,
-  },
+export const CHAIN: ChainConfig = {
+  chainIdHex: '0xF22F', // 61999
+  chainIdDecimal: 61999,
+  chainName: 'GenLayer StudioNet',
+  rpcUrl: 'https://studio.genlayer.com/api',
+  explorerUrl: 'https://explorer-studio.genlayer.com',
+  contractAddress: STUDIONET_CONTRACT_ADDRESS,
 };
-
-export const DEFAULT_NETWORK: NetworkKey = 'studionet';
 
 // Receipt-wait config -- GenLayer consensus genuinely takes real minutes,
 // especially for any write triggering an LLM judgment (submit_attempt).
 // Confirmed reasonable values per this project's established pattern.
-export const RECEIPT_CONFIG: Record<NetworkKey, { retries: number; interval: number }> = {
-  studionet: { retries: 120, interval: 4000 },
-  bradbury: { retries: 240, interval: 6000 },
-};
+export const RECEIPT_CONFIG = { retries: 120, interval: 4000 };
 
 // Which write methods trigger a nondet/LLM judgment -- these need the
-// "this can take several minutes" UI treatment, create_milestone doesn't
-// (it's fully deterministic).
+// "this can take several minutes" UI treatment. create_milestone and
+// reclaim_stake are both fully deterministic (no LLM call), so neither
+// belongs in this set -- only submit_attempt does.
 export const NONDET_METHODS = new Set(['submit_attempt']);
 
 // Fixed criterion type options -- must match the contract's
-// _VALID_CRITERION_TYPES exactly (contracts/milestonevault.py).
+// _VALID_CRITERION_TYPES exactly (contracts/milestonevault.py). The
+// targetPlaceholder for each now hints at the format
+// _validate_target_for_criterion actually enforces contract-side, so a
+// submission that would revert is visibly wrong before it's ever sent.
 export const CRITERION_TYPES = [
-  { value: 'star_count', label: 'Star count', targetLabel: 'Minimum stars', targetPlaceholder: 'e.g. 100' },
-  { value: 'pr_merged', label: 'PR merged', targetLabel: 'PR number', targetPlaceholder: 'e.g. 42 or #42' },
-  { value: 'release_tag', label: 'Release tag', targetLabel: 'Tag name', targetPlaceholder: 'e.g. v1.0.0' },
+  {
+    value: 'star_count',
+    label: 'Star count',
+    targetLabel: 'Minimum stars',
+    targetPlaceholder: 'e.g. 100 (whole number only)',
+  },
+  {
+    value: 'pr_merged',
+    label: 'PR merged',
+    targetLabel: 'PR number',
+    targetPlaceholder: 'e.g. 42 or #42 (numeric only)',
+  },
+  {
+    value: 'release_tag',
+    label: 'Release tag',
+    targetLabel: 'Tag name',
+    targetPlaceholder: 'e.g. v1.0.0 (no spaces)',
+  },
 ] as const;
 
 export type CriterionType = (typeof CRITERION_TYPES)[number]['value'];
+
+// Deadline bounds -- must match the contract's _MIN_DEADLINE_DAYS /
+// _MAX_DEADLINE_DAYS exactly (contracts/milestonevault.py). Enforced
+// client-side too so an out-of-range value is visibly wrong before
+// submission, not just a contract-side revert after a wallet round trip.
+export const MIN_DEADLINE_DAYS = 1;
+export const MAX_DEADLINE_DAYS = 3650;
