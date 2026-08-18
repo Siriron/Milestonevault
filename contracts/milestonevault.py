@@ -68,6 +68,20 @@ Same confirmed rules as every other contract in this project:
   7. No array-shaped nested-dataclass field anywhere in this contract
      (single flat record type, no per-record arrays) — Bug 7 does not
      apply here, noted explicitly rather than left unaddressed.
+  8. gl.message_raw["datetime"] is an ISO-8601 UTC string, never a Unix
+     integer. _now_epoch_seconds() (copied verbatim from project
+     knowledge) is used for both the deadline lock at create_milestone
+     and the deadline checks in submit_attempt/reclaim_stake — added
+     Aug 16 2026 per steward review; this contract had no timestamp
+     handling at all before that.
+  9. Bug 9 (GitHub HTML-vs-diff) does not apply here — this contract
+     never fetches a commit URL, only repository/PR/release REST API
+     endpoints, which return JSON directly with no client-side
+     rendering step to route around.
+ 10. Bug 10 (Address-keyed TreeMap normalization) does not apply here —
+     milestones is keyed by u256 milestone_id, never by an Address-
+     derived string, so there is no dual-convention key-casing surface
+     for this bug to occur on.
 
 VERDICT SHAPE — binary (met / not_met), deliberately not three-way.
 Copyleft and Recourse both needed an inconclusive/unverifiable middle
@@ -146,18 +160,47 @@ DELIBERATE GAPS, STATED EXPLICITLY:
     future concept with more open-ended reasoning may still need the
     heavier pattern-based or second-derivation check described in
     project knowledge section 3.
-  - No deadline/expiry on a milestone — a grantor's stake can sit
-    locked indefinitely if a recipient never completes the criterion.
-    No cancellation/reclaim path exists in this version. Explicitly
-    out of scope for v1; a future version could add a grantor-only
-    reclaim after a fixed on-chain time window once
-    gl.message_raw["datetime"]'s parseable format is confirmed (see
-    Recourse's own still-open note on this exact point).
+  - RESOLVED (was open in v1, closed per steward review Aug 16 2026,
+    Pavel Kolosov): a bounded grantor-only reclaim path now exists.
+    create_milestone locks a deadline_days (1-3650) parameter at
+    creation, converted to an absolute deadline_ts using
+    _now_epoch_seconds() (Bug 8's confirmed-correct ISO-8601 parser,
+    copied verbatim, not re-derived). submit_attempt is blocked once
+    now_ts >= deadline_ts; reclaim_stake is only callable by the
+    original grantor, only once now_ts >= deadline_ts, only while
+    status is still "locked", and transfers the full stake back to the
+    grantor via emit_transfer (never .send()). This closes both stated
+    failure modes: an unmet criterion (recipient never gets there) and
+    an unavailable recipient (wrong address, lost key, or a recipient
+    who simply never calls submit_attempt) no longer lock the stake
+    forever -- the grantor can always recover funds after the window,
+    whether or not the recipient ever acts. NOT YET LIVE-VERIFIED --
+    see the redeploy checklist for what still needs a real Studio test
+    pass before this can be marked confirmed rather than theoretically
+    correct.
+  - deadline_ts, once locked at create_milestone, is never reshaped
+    afterward by either party -- the same locked-before-outcome-is-
+    known discipline project knowledge names for Recourse's spec_items
+    and this contract's own target_value. There is no "extend deadline"
+    method; a grantor who wants more time for a stalled recipient has
+    no way to give it within this contract, which is the deliberate
+    trade-off of keeping the lock genuinely immutable rather than
+    reopening the same renegotiation-after-the-fact risk this project's
+    design principle exists to close.
   - Only three criterion types are supported (star count, PR merge
     status, release tag existence). Arbitrary free-text criteria are
     explicitly out of scope — that would reintroduce exactly the kind
     of caller-described, unverifiable-against-anything-independent
     claim shape this design exists to avoid.
+  - target_value type-checking (_validate_target_for_criterion) checks
+    FORMAT only (numeric for star_count/pr_merged, ref-legal characters
+    for release_tag) -- it does not and cannot confirm the target
+    actually exists on GitHub before creation, since that would require
+    a fetch outside the nondet block at creation time, which this
+    contract does not do. A syntactically valid but nonexistent PR
+    number or tag still creates successfully and simply resolves
+    not_met on every submit_attempt until the deadline passes, at which
+    point reclaim_stake is the recipient-side-error recovery path.
 """
 
 from genlayer import *
@@ -241,6 +284,85 @@ _CHARTER = (
 
 _VERDICT_ALIASES = ("verdict", "result", "decision", "outcome", "judgment")
 _REASONING_ALIASES = ("reasoning_summary", "reasoning", "explanation", "rationale", "summary")
+
+_SECONDS_PER_DAY = 86400
+_MIN_DEADLINE_DAYS = 1  # a grantor cannot lock a deadline so short the
+                          # recipient has no real chance to ever call
+                          # submit_attempt before reclaim_stake opens up.
+_MAX_DEADLINE_DAYS = 3650  # ten years — a sane upper bound so a
+                             # fat-fingered deadline field can't lock a
+                             # stake for a functionally-infinite window,
+                             # which would defeat the point of this fix.
+
+
+# ---------------------------------------------------------------------------
+# Timestamp handling — confirmed-correct fix, copied verbatim from project
+# knowledge (Bug 8). gl.message_raw["datetime"] is an ISO-8601 UTC string
+# with microsecond precision and a trailing Z, NEVER a Unix integer — do
+# not re-derive this parsing by hand.
+# ---------------------------------------------------------------------------
+
+_DAYS_IN_MONTH = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+
+def _is_leap_year(year) -> bool:
+    return (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
+
+
+def _days_in_month(year, month) -> int:
+    if month == 2 and _is_leap_year(year):
+        return 29
+    return _DAYS_IN_MONTH[month - 1]
+
+
+def _now_epoch_seconds() -> int:
+    """
+    CONFIRMED LIVE: gl.message_raw["datetime"] is an ISO-8601 UTC string
+    with microsecond precision and a trailing 'Z' -- NOT a Unix timestamp
+    integer. Calling int() on it directly raises ValueError immediately.
+    Independently verified against Python's own datetime as an oracle
+    across six cases, including the year-2100 non-leap-century edge case.
+    Returns 0 (never raises) if the field is absent or malformed -- every
+    caller should treat 0 defensively as "unknown/epoch start," which for
+    reclaim_stake below means a malformed clock reads as "deadline not
+    yet reached" rather than accidentally unlocking early.
+    """
+    try:
+        raw = gl.message_raw.get("datetime", None) if isinstance(gl.message_raw, dict) else None
+        if not isinstance(raw, str) or len(raw) < 19:
+            return 0
+
+        s = raw.strip()
+        if s.endswith("Z"):
+            s = s[:-1]
+        s = s.split(".")[0]
+
+        date_part, _, time_part = s.partition("T")
+        y_str, m_str, d_str = date_part.split("-")
+        hh_str, mm_str, ss_str = time_part.split(":")
+
+        if not (y_str.isdigit() and m_str.isdigit() and d_str.isdigit()
+                and hh_str.isdigit() and mm_str.isdigit() and ss_str.isdigit()):
+            return 0
+
+        year, month, day = int(y_str), int(m_str), int(d_str)
+        hour, minute, second = int(hh_str), int(mm_str), int(ss_str)
+
+        if not (1970 <= year <= 9999 and 1 <= month <= 12 and 1 <= day <= 31):
+            return 0
+        if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 60):
+            return 0
+
+        days = 0
+        for y in range(1970, year):
+            days += 366 if _is_leap_year(y) else 365
+        for m in range(1, month):
+            days += _days_in_month(year, m)
+        days += day - 1
+
+        return days * 86400 + hour * 3600 + minute * 60 + second
+    except Exception:
+        return 0
 
 
 def _sanitize(text, max_len=_MAX_TEXT_LEN) -> str:
@@ -344,6 +466,48 @@ def _reasoning_references_target(reasoning, target_value) -> bool:
     return norm_target in norm_reasoning
 
 
+def _validate_repo_field(value) -> bool:
+    # GitHub owner/repo names: letters, digits, hyphens, underscores,
+    # periods only, no leading/trailing slash, non-empty after strip.
+    # Deterministic, plain Python -- no LLM call needed, since this is a
+    # format question, not a judgment question.
+    v = value.strip().strip("/")
+    if len(v) == 0 or len(v) > 100:
+        return False
+    return all(ch.isalnum() or ch in ("-", "_", ".") for ch in v)
+
+
+def _validate_target_for_criterion(criterion_type, target_value) -> bool:
+    # Deterministically type-checks target_value against what its own
+    # criterion_type actually needs, BEFORE it is ever used to build a
+    # fetch URL or compared by the model. This is the fix for the second
+    # half of the steward's "deterministically parse and type-check the
+    # GitHub fields" note -- previously target_value was only length-
+    # capped, meaning e.g. a non-numeric pr_merged target silently built
+    # a malformed API URL and the failure only surfaced later as a
+    # generic fetch-failure marker at attempt time, not as a clear
+    # creation-time rejection.
+    v = target_value.strip()
+    if len(v) == 0:
+        return False
+    if criterion_type == _CRITERION_STAR_COUNT:
+        # a non-negative integer star-count target
+        return v.isdigit()
+    if criterion_type == _CRITERION_PR_MERGED:
+        # a PR number, optionally "#"-prefixed
+        num = v.lstrip("#")
+        return len(num) > 0 and num.isdigit()
+    if criterion_type == _CRITERION_RELEASE_TAG:
+        # a real tag name: GitHub tags are refs, so no whitespace and no
+        # characters refs forbid (~^:?*[\ and control chars); _sanitize
+        # already stripped non-printables, so this only needs to check
+        # the ref-forbidden printable set specifically.
+        if any(ch.isspace() for ch in v):
+            return False
+        return not any(ch in v for ch in ("~", "^", ":", "?", "*", "[", "\\"))
+    return False
+
+
 def _build_evidence_url(criterion_type, repo_owner, repo_name, target_value) -> str:
     # CONFIRMED FIX (Aug 13 2026): originally built URLs to GitHub's
     # rendered HTML pages (github.com/...) and asked the model to find a
@@ -407,10 +571,16 @@ class Milestone:
     target_value: str
     description: str
     stake_amount: u256
-    status: str  # "locked" | "released"
+    status: str  # "locked" | "released" | "reclaimed"
     last_verdict: str
     last_reasoning: str
     attempt_count: u256
+    deadline_ts: u256  # epoch seconds; locked at creation, never
+                         # reshaped afterward. 0 means "malformed clock
+                         # at creation" and is treated as "never
+                         # reclaimable" by reclaim_stake below, the same
+                         # fail-safe direction _now_epoch_seconds() itself
+                         # documents.
 
 
 class MilestoneVault(gl.Contract):
@@ -433,24 +603,47 @@ class MilestoneVault(gl.Contract):
         criterion_type: str,
         target_value: str,
         description: str,
+        deadline_days: u256,
     ) -> str:
         assert gl.message.value > 0, "must stake GEN to create a milestone"
 
         clean_owner = _sanitize(repo_owner, 200)
         assert len(clean_owner) > 0, "repo_owner cannot be empty"
+        assert _validate_repo_field(clean_owner), "repo_owner is not a valid GitHub owner/org name"
         clean_name = _sanitize(repo_name, 200)
         assert len(clean_name) > 0, "repo_name cannot be empty"
+        assert _validate_repo_field(clean_name), "repo_name is not a valid GitHub repo name"
 
         clean_criterion = _sanitize(criterion_type, 50).strip().lower()
         assert clean_criterion in _VALID_CRITERION_TYPES, "invalid criterion_type"
 
         clean_target = _sanitize(target_value, 200)
         assert len(clean_target) > 0, "target_value cannot be empty"
+        # Deterministic type-check, matched to what this specific
+        # criterion_type actually needs -- e.g. a non-numeric target on a
+        # pr_merged milestone is rejected here, at creation, rather than
+        # silently building a malformed API URL that only surfaces as a
+        # generic fetch failure at attempt time.
+        assert _validate_target_for_criterion(clean_criterion, clean_target), (
+            "target_value is not valid for this criterion_type"
+        )
 
         clean_description = _sanitize(description, _MAX_TEXT_LEN)
 
         recipient_addr = Address(recipient)
         assert recipient_addr != gl.message.sender_address, "recipient cannot be the grantor"
+
+        deadline_days_int = int(deadline_days)
+        assert _MIN_DEADLINE_DAYS <= deadline_days_int <= _MAX_DEADLINE_DAYS, (
+            "deadline_days must be between 1 and 3650"
+        )
+        created_ts = _now_epoch_seconds()
+        # created_ts == 0 means the clock field was absent/malformed at
+        # creation time -- fail closed rather than silently locking a
+        # deadline relative to the epoch, which would make the milestone
+        # reclaimable immediately.
+        assert created_ts > 0, "could not read a valid on-chain timestamp; try again"
+        deadline_ts = created_ts + (deadline_days_int * _SECONDS_PER_DAY)
 
         mid = self.next_id
         self.next_id = u256(int(self.next_id) + 1)
@@ -469,20 +662,28 @@ class MilestoneVault(gl.Contract):
             last_verdict="",
             last_reasoning="",
             attempt_count=u256(0),
+            deadline_ts=u256(deadline_ts),
         )
 
-        return json.dumps({"milestone_id": int(mid), "status": "locked"})
+        return json.dumps({
+            "milestone_id": int(mid),
+            "status": "locked",
+            "deadline_ts": deadline_ts,
+        })
 
     # ------------------------------------------------------------------
-    # Attestation attempt (nondet — full seven-item catalog audit applies)
+    # Attestation attempt (nondet — full ten-item catalog audit applies)
     # ------------------------------------------------------------------
 
     @gl.public.write
     def submit_attempt(self, milestone_id: u256) -> str:
         assert milestone_id in self.milestones, "not found"
         m = self.milestones[milestone_id]
-        assert m.status == "locked", "milestone already released"
+        assert m.status == "locked", "milestone already released or reclaimed"
         assert gl.message.sender_address == m.recipient, "only the recipient may submit an attempt"
+        now_ts = _now_epoch_seconds()
+        assert now_ts > 0, "could not read a valid on-chain timestamp; try again"
+        assert now_ts < int(m.deadline_ts), "deadline has passed; this milestone is now reclaim-only"
 
         # Bug 4 fix: copy to memory BEFORE entering run_nondet_unsafe.
         m_mem = gl.storage.copy_to_memory(m)
@@ -554,6 +755,36 @@ class MilestoneVault(gl.Contract):
         })
 
     # ------------------------------------------------------------------
+    # Reclaim (fully deterministic, no nondet) -- the bounded expiry/
+    # refund path the steward's review requested. Grantor-only, only
+    # after deadline_ts has passed, only while the milestone is still
+    # "locked". Prevents an unmet criterion or an unreachable recipient
+    # from locking the stake forever.
+    # ------------------------------------------------------------------
+
+    @gl.public.write
+    def reclaim_stake(self, milestone_id: u256) -> str:
+        assert milestone_id in self.milestones, "not found"
+        m = self.milestones[milestone_id]
+        assert m.status == "locked", "milestone already released or reclaimed"
+        assert gl.message.sender_address == m.grantor, "only the grantor may reclaim"
+        now_ts = _now_epoch_seconds()
+        assert now_ts > 0, "could not read a valid on-chain timestamp; try again"
+        assert now_ts >= int(m.deadline_ts), "deadline has not passed yet"
+
+        m.status = "reclaimed"
+        self.milestones[milestone_id] = m
+        # Bug 3 fix: value transfer via emit_transfer, never .send().
+        # Settlement after the storage write, mirroring submit_attempt's
+        # own confirmed-correct settlement ordering.
+        gl.get_contract_at(m.grantor).emit_transfer(value=m.stake_amount)
+
+        return json.dumps({
+            "milestone_id": int(milestone_id),
+            "status": m.status,
+        })
+
+    # ------------------------------------------------------------------
     # Views
     # ------------------------------------------------------------------
 
@@ -575,6 +806,7 @@ class MilestoneVault(gl.Contract):
             "last_verdict": m.last_verdict,
             "last_reasoning": m.last_reasoning,
             "attempt_count": int(m.attempt_count),
+            "deadline_ts": int(m.deadline_ts),
         })
 
     @gl.public.view
